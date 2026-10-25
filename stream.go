@@ -188,6 +188,11 @@ WAIT:
 	}
 	select {
 	case <-s.session.shutdownCh:
+		// The session is gone: return instead of falling through to START.
+		// Looping here would spin the CPU while the shutdown is in progress.
+		// io.EOF matches what the stream reports once the session has force
+		// closed it.
+		return 0, io.EOF
 	case <-s.recvNotifyCh:
 	case <-timeout:
 		return 0, ErrTimeout
@@ -284,6 +289,9 @@ WAIT:
 	}
 	select {
 	case <-s.session.shutdownCh:
+		// The session is gone: return instead of falling through to START.
+		// Looping here would spin the CPU while the shutdown is in progress.
+		return 0, ErrSessionShutdown
 	case <-s.sendNotifyCh:
 	case <-timeout:
 		return 0, ErrTimeout
