@@ -393,6 +393,11 @@ func (s *Session) AcceptStreamWithContext(ctx context.Context) (*Stream, error) 
 	}
 }
 
+// transportCloseTimeout bounds the time Session.Close spends waiting for the
+// underlying transport to close. A transport can block in Close while a write
+// is still pending, so the write deadline is what keeps the shutdown bounded.
+const transportCloseTimeout = time.Second
+
 // Close is used to close the session and all streams.
 // Attempts to send a GoAway before closing the connection.
 func (s *Session) Close() error {
@@ -411,6 +416,15 @@ func (s *Session) Close() error {
 	s.shutdownErrLock.Unlock()
 
 	close(s.shutdownCh)
+
+	// Bound the time the transport close may take. A transport whose Close
+	// waits for a pending write to finish - golang.org/x/net/websocket has to
+	// take a mutex that a pending write may be holding - would otherwise keep
+	// the whole shutdown blocked. The write deadline makes the pending write
+	// fail, which releases the transport and lets the close complete.
+	if d, ok := s.conn.(interface{ SetWriteDeadline(time.Time) error }); ok {
+		_ = d.SetWriteDeadline(time.Now().Add(transportCloseTimeout))
+	}
 
 	_ = s.conn.Close()
 	<-s.recvDoneCh
